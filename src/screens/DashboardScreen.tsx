@@ -126,7 +126,10 @@ export function DashboardScreen() {
                 key={task.id}
                 style={styles.taskItem}
                 onPress={() =>
-                  navigation.navigate('TaskDetails', { taskId: task.id })
+                  navigation.navigate('Post', {
+                    screen: 'ManageTask',
+                    params: { taskId: task.id },
+                  })
                 }
               >
                 <View style={styles.taskIcon}>

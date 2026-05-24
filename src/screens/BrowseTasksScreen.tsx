@@ -12,10 +12,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { fetchTasks, Task } from '../api/tasks';
 
 export function BrowseTasksScreen() {
+  const navigation = useNavigation<any>();
   const [searchText, setSearchText] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -101,7 +103,12 @@ export function BrowseTasksScreen() {
           data={tasks}
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
-            <Pressable style={styles.taskCard}>
+            <Pressable
+              style={styles.taskCard}
+              onPress={() =>
+                navigation.navigate('TaskDetails', { taskId: item.id })
+              }
+            >
               <View style={styles.taskImage}>
                 <Text style={styles.emoji}>📝</Text>
               </View>

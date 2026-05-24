@@ -33,6 +33,18 @@ export async function fetchTaskApplications(
   return data.applications;
 }
 
+export async function applyToTask(
+  taskId: number,
+  payload: { message: string; proposed_price: number },
+): Promise<{ message: string }> {
+  const response = await safeFetch(apiUrl(`/tasks/${taskId}/applications`), {
+    method: 'POST',
+    headers: await authHeaders(),
+    body: JSON.stringify(payload),
+  });
+  return parseJson<{ message: string }>(response);
+}
+
 export async function fetchApplication(
   applicationId: number,
 ): Promise<TaskApplication & { task: { id: number; title: string; price: string } }> {

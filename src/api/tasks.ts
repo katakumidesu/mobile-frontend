@@ -1,5 +1,6 @@
 import { API_BASE_URL } from '../config';
 import { getStoredToken } from './auth';
+import type { TaskPermissions } from '../utils/taskPermissions';
 
 export type Task = {
   id: number;
@@ -9,10 +10,25 @@ export type Task = {
   price: string;
   location: string;
   deadline: string | null;
-  status: 'open' | 'in_progress' | 'completed';
+  status: 'open' | 'in_progress' | 'completed' | 'paid';
   category: string | null;
   created_at: string;
   user?: { id: number; name: string };
+};
+
+export type TaskDetailResponse = {
+  task: Task;
+  permissions: TaskPermissions;
+};
+
+export type UpdateTaskPayload = {
+  title?: string;
+  description?: string;
+  price?: number;
+  location?: string;
+  deadline?: string | null;
+  category?: string | null;
+  status?: Task['status'];
 };
 
 export type PaginatedTasks = {
@@ -101,9 +117,35 @@ export async function createTask(payload: CreateTaskPayload): Promise<Task> {
   return data.task;
 }
 
-export async function fetchTask(id: number): Promise<Task> {
+export async function fetchTaskDetail(id: number): Promise<TaskDetailResponse> {
   const headers = await authHeaders();
   const response = await safeFetch(`${API_BASE_URL}/api/tasks/${id}`, { headers });
-  const data = await parseJson<{ task: Task }>(response);
-  return data.task;
+  return parseJson<TaskDetailResponse>(response);
+}
+
+export async function fetchTask(id: number): Promise<Task> {
+  const { task } = await fetchTaskDetail(id);
+  return task;
+}
+
+export async function updateTask(
+  id: number,
+  payload: UpdateTaskPayload,
+): Promise<TaskDetailResponse> {
+  const headers = await authHeaders();
+  const response = await safeFetch(`${API_BASE_URL}/api/tasks/${id}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  return parseJson<TaskDetailResponse>(response);
+}
+
+export async function deleteTask(id: number): Promise<void> {
+  const headers = await authHeaders();
+  const response = await safeFetch(`${API_BASE_URL}/api/tasks/${id}`, {
+    method: 'DELETE',
+    headers,
+  });
+  await parseJson<{ message: string }>(response);
 }

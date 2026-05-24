@@ -1,24 +1,59 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   Pressable,
-  Image,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { colors } from '../theme/colors';
+import { fetchTaskDetail } from '../api/tasks';
+import type { Task } from '../api/tasks';
+import type { TaskPermissions } from '../utils/taskPermissions';
+import { PERMISSION_MESSAGES } from '../utils/taskPermissions';
+import { formatPeso } from '../utils/currency';
+import { UserAvatar } from '../components/UserAvatar';
 
 export function TaskDetailsScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const taskId = route.params?.taskId as number;
+  const [task, setTask] = useState<Task | null>(null);
+  const [permissions, setPermissions] = useState<TaskPermissions | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!taskId) return;
+    fetchTaskDetail(taskId)
+      .then(({ task: t, permissions: p }) => {
+        setTask(t);
+        setPermissions(p);
+      })
+      .catch((e: Error) => {
+        Alert.alert('Error', e.message);
+        navigation.goBack();
+      })
+      .finally(() => setLoading(false));
+  }, [taskId, navigation]);
+
+  if (loading || !task || !permissions) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ActivityIndicator size="large" color={colors.primary} style={styles.loader} />
+      </SafeAreaView>
+    );
+  }
+
+  const posterName = task.user?.name ?? 'Unknown';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
         <View style={styles.header}>
           <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
             <Ionicons name="chevron-back" size={24} color={colors.text} />
@@ -27,68 +62,106 @@ export function TaskDetailsScreen() {
           <View style={styles.placeholder} />
         </View>
 
-        {/* Task Image/Icon */}
+        {permissions.is_owner ? (
+          <View style={styles.bannerOwner}>
+            <Ionicons name="shield-checkmark" size={18} color={colors.primary} />
+            <Text style={styles.bannerText}>{PERMISSION_MESSAGES.ownerPrompt}</Text>
+          </View>
+        ) : (
+          <View style={styles.bannerApplicant}>
+            <Ionicons name="information-circle" size={18} color={colors.secondary} />
+            <Text style={styles.bannerText}>
+              {PERMISSION_MESSAGES.applyPrompt(posterName)}
+            </Text>
+          </View>
+        )}
+
         <View style={styles.imageContainer}>
-          <Text style={styles.largeEmoji}>🏠</Text>
+          <Text style={styles.largeEmoji}>📝</Text>
         </View>
 
-        {/* Task Info */}
         <View style={styles.contentContainer}>
-          <Text style={styles.title}>House Cleaning Service</Text>
-          <View style={styles.ratingRow}>
-            <Ionicons name="star" size={16} color={colors.warning} />
-            <Text style={styles.rating}>4.8 (24 reviews)</Text>
-            <Text style={styles.location}>• 5km away</Text>
+          <Text style={styles.title}>{task.title}</Text>
+          <View style={styles.metaRow}>
+            <Ionicons name="location" size={14} color={colors.textMuted} />
+            <Text style={styles.location}>{task.location}</Text>
+            {task.category ? (
+              <Text style={styles.category}>• {task.category}</Text>
+            ) : null}
           </View>
 
-          {/* Price and Budget */}
           <View style={styles.priceSection}>
             <View style={styles.priceBox}>
               <Text style={styles.priceLabel}>Budget</Text>
-              <Text style={styles.priceValue}>₱50</Text>
+              <Text style={styles.priceValue}>{formatPeso(Number(task.price))}</Text>
             </View>
             <View style={styles.priceBox}>
-              <Text style={styles.priceLabel}>Duration</Text>
-              <Text style={styles.priceValue}>2-3 hours</Text>
-            </View>
-            <View style={styles.priceBox}>
-              <Text style={styles.priceLabel}>Deadline</Text>
-              <Text style={styles.priceValue}>5 days</Text>
+              <Text style={styles.priceLabel}>Status</Text>
+              <Text style={styles.priceValue}>{task.status.replace('_', ' ')}</Text>
             </View>
           </View>
 
-          {/* Description */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Description</Text>
-            <Text style={styles.description}>
-              Looking for someone to help clean my house. Main areas: kitchen,
-              living room, and 2 bathrooms. Please bring your own cleaning supplies.
-            </Text>
+            <Text style={styles.description}>{task.description}</Text>
           </View>
 
-          {/* Poster Info */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Posted by</Text>
             <View style={styles.posterCard}>
-              <Text style={styles.posterAvatar}>👤</Text>
+              <UserAvatar name={posterName} size={40} />
               <View style={styles.posterInfo}>
-                <Text style={styles.posterName}>John Doe</Text>
-                <Text style={styles.posterMeta}>24 tasks posted • 4.9★</Text>
+                <Text style={styles.posterName}>{posterName}</Text>
+                <Text style={styles.posterMeta}>Task creator</Text>
               </View>
             </View>
           </View>
 
-          {/* Action Buttons */}
-          <Pressable 
-            style={[styles.button, styles.primaryButton]}
-            onPress={() => navigation.navigate('ApplyTask', { taskId: 1 })}
-          >
-            <Text style={styles.buttonText}>Apply Now</Text>
-          </Pressable>
-          <Pressable style={[styles.button, styles.secondaryButton]}>
-            <Ionicons name="heart-outline" size={18} color={colors.primary} />
-            <Text style={styles.secondaryButtonText}>Save Task</Text>
-          </Pressable>
+          {permissions.is_owner ? (
+            <>
+              <Pressable
+                style={[styles.button, styles.primaryButton]}
+                onPress={() =>
+                  navigation.navigate('Post', {
+                    screen: 'ManageTask',
+                    params: { taskId: task.id },
+                  })
+                }
+              >
+                <Ionicons name="settings" size={18} color={colors.card} />
+                <Text style={styles.buttonText}>Manage Task</Text>
+              </Pressable>
+              {permissions.can_view_applications && (
+                <Pressable
+                  style={[styles.button, styles.secondaryButton]}
+                  onPress={() =>
+                    navigation.navigate('Post', {
+                      screen: 'TaskApplications',
+                      params: { taskId: task.id },
+                    })
+                  }
+                >
+                  <Ionicons name="people" size={18} color={colors.primary} />
+                  <Text style={styles.secondaryButtonText}>View Applications</Text>
+                </Pressable>
+              )}
+            </>
+          ) : permissions.can_apply ? (
+            <Pressable
+              style={[styles.button, styles.primaryButton]}
+              onPress={() =>
+                navigation.navigate('ApplyTask', { taskId: task.id })
+              }
+            >
+              <Text style={styles.buttonText}>Apply for This Task</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.closedBanner}>
+              <Text style={styles.closedText}>
+                This task is not accepting applications.
+              </Text>
+            </View>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -100,6 +173,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  loader: {
+    flex: 1,
+    justifyContent: 'center',
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -110,28 +187,53 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  backButton: {
-    padding: 8,
-  },
+  backButton: { padding: 8 },
   headerTitle: {
     fontSize: 16,
     fontWeight: '700',
     color: colors.text,
   },
-  placeholder: {
-    width: 40,
+  placeholder: { width: 40 },
+  bannerOwner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    margin: 16,
+    marginBottom: 0,
+    padding: 12,
+    backgroundColor: '#EDE9FE',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
+  },
+  bannerApplicant: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    margin: 16,
+    marginBottom: 0,
+    padding: 12,
+    backgroundColor: '#E6FFFA',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.success,
+  },
+  bannerText: {
+    flex: 1,
+    fontSize: 12,
+    color: colors.text,
+    lineHeight: 18,
   },
   imageContainer: {
-    height: 200,
+    height: 120,
     backgroundColor: colors.card,
     justifyContent: 'center',
     alignItems: 'center',
+    marginTop: 16,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  largeEmoji: {
-    fontSize: 80,
-  },
+  largeEmoji: { fontSize: 56 },
   contentContainer: {
     paddingHorizontal: 16,
     paddingVertical: 20,
@@ -141,18 +243,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text,
   },
-  ratingRow: {
+  metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 4,
     marginTop: 8,
-  },
-  rating: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.text,
+    flexWrap: 'wrap',
   },
   location: {
+    fontSize: 13,
+    color: colors.textMuted,
+  },
+  category: {
     fontSize: 13,
     color: colors.textMuted,
   },
@@ -176,13 +278,12 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   priceValue: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
     color: colors.primary,
+    textTransform: 'capitalize',
   },
-  section: {
-    marginBottom: 20,
-  },
+  section: { marginBottom: 20 },
   sectionTitle: {
     fontSize: 14,
     fontWeight: '700',
@@ -202,14 +303,9 @@ const styles = StyleSheet.create({
     padding: 12,
     borderWidth: 1,
     borderColor: colors.border,
+    gap: 12,
   },
-  posterAvatar: {
-    fontSize: 32,
-    marginRight: 12,
-  },
-  posterInfo: {
-    flex: 1,
-  },
+  posterInfo: { flex: 1 },
   posterName: {
     fontSize: 14,
     fontWeight: '600',
@@ -221,31 +317,40 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   button: {
+    flexDirection: 'row',
     borderRadius: 10,
     paddingVertical: 14,
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
+    gap: 8,
   },
-  primaryButton: {
-    backgroundColor: colors.primary,
-  },
+  primaryButton: { backgroundColor: colors.primary },
   buttonText: {
     fontSize: 16,
     fontWeight: '700',
     color: colors.card,
   },
   secondaryButton: {
-    flexDirection: 'row',
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
-    gap: 8,
   },
   secondaryButtonText: {
     fontSize: 16,
     fontWeight: '700',
     color: colors.primary,
+  },
+  closedBanner: {
+    padding: 14,
+    backgroundColor: colors.tabBg,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  closedText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    textAlign: 'center',
   },
 });
