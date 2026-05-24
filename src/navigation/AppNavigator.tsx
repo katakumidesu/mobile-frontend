@@ -8,6 +8,7 @@ import type { AppTabParamList } from './types';
 
 // Import screens
 import { DashboardScreen } from '../screens/DashboardScreen';
+import { NotificationsScreen } from '../screens/NotificationsScreen';
 import { BrowseTasksScreen } from '../screens/BrowseTasksScreen';
 import { PostTaskScreen } from '../screens/PostTaskScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -19,6 +20,8 @@ import { ManageTaskScreen } from '../screens/ManageTaskScreen';
 import { TaskApplicationsScreen } from '../screens/TaskApplicationsScreen';
 import { ApplicantDetailScreen } from '../screens/ApplicantDetailScreen';
 import { ApplyTaskScreen } from '../screens/ApplyTaskScreen';
+import { EditTaskScreen } from '../screens/EditTaskScreen';
+import { CompleteTaskScreen } from '../screens/CompleteTaskScreen';
 
 type Props = {
   user: AuthUser;
@@ -38,6 +41,7 @@ function HomeStackNavigator() {
       }}
     >
       <HomeStack.Screen name="Dashboard" component={DashboardScreen} />
+      <HomeStack.Screen name="Notifications" component={NotificationsScreen} />
       <HomeStack.Screen name="TaskDetails" component={TaskDetailsScreen} />
       <HomeStack.Screen name="WorkerProfile" component={WorkerProfileScreen} />
     </HomeStack.Navigator>
@@ -52,6 +56,7 @@ function BrowseStackNavigator() {
       }}
     >
       <BrowseStack.Screen name="BrowseTasks" component={BrowseTasksScreen} />
+      <BrowseStack.Screen name="Notifications" component={NotificationsScreen} />
       <BrowseStack.Screen name="TaskDetails" component={TaskDetailsScreen} />
       <BrowseStack.Screen name="ApplyTask" component={ApplyTaskScreen} />
     </BrowseStack.Navigator>
@@ -66,9 +71,11 @@ function PostStackNavigator() {
       }}
     >
       <PostStack.Screen name="PostForm" component={PostTaskScreen} />
+      <PostStack.Screen name="EditTask" component={EditTaskScreen} />
       <PostStack.Screen name="ManageTask" component={ManageTaskScreen} />
       <PostStack.Screen name="TaskApplications" component={TaskApplicationsScreen} />
       <PostStack.Screen name="ApplicantDetail" component={ApplicantDetailScreen} />
+      <PostStack.Screen name="CompleteTask" component={CompleteTaskScreen} />
     </PostStack.Navigator>
   );
 }
@@ -81,6 +88,7 @@ function ProfileStackNavigator() {
       }}
     >
       <ProfileStack.Screen name="ProfileMain" component={ProfileScreen} />
+      <ProfileStack.Screen name="Notifications" component={NotificationsScreen} />
       <ProfileStack.Screen name="EditProfile" component={EditProfileScreen} />
       <ProfileStack.Screen name="Ratings" component={RatingsScreen} />
     </ProfileStack.Navigator>
@@ -151,6 +159,15 @@ export function AppNavigator({ user }: Props) {
         options={{
           tabBarLabel: 'Post',
         }}
+        listeners={({ navigation }) => ({
+          tabPress: (e) => {
+            e.preventDefault();
+            navigation.navigate('Post', {
+              screen: 'PostForm',
+              params: { mode: 'create', resetAt: Date.now() },
+            });
+          },
+        })}
       />
       <Tab.Screen
         name="Profile"

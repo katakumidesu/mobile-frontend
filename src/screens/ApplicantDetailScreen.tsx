@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -10,53 +10,119 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { colors } from '../theme/colors';
-import { fetchApplication } from '../api/applications';
+import {
+  fetchApplication,
+  hireApplicant,
+  rejectApplicant,
+  canRespondToApplication,
+} from '../api/applications';
 import { UserAvatar } from '../components/UserAvatar';
 import { formatPeso } from '../utils/currency';
+import { formatTaskStatusLabel } from '../utils/taskPermissions';
 
 export function ApplicantDetailScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const applicationId = route.params?.applicantId as number;
+  const applicationId = route.params?.applicationId as number;
   const [loading, setLoading] = useState(true);
-  const [hiring, setHiring] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
   const [application, setApplication] = useState<Awaited<
     ReturnType<typeof fetchApplication>
   > | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!applicationId) return;
+    setLoading(true);
     fetchApplication(applicationId)
       .then(setApplication)
       .catch(() => setApplication(null))
       .finally(() => setLoading(false));
   }, [applicationId]);
 
-  const applicant = application?.applicant;
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
 
-  const handleHire = async () => {
-    if (!applicant) return;
-    setHiring(true);
-    try {
-      Alert.alert(
-        'Success',
-        `You have successfully hired ${applicant.name} for this task!`,
-        [{ text: 'OK', onPress: () => navigation.goBack() }],
-      );
-    } finally {
-      setHiring(false);
-    }
+  const applicant = application?.applicant;
+  const task = application?.task;
+  const canAct =
+    application && task
+      ? canRespondToApplication(application.status, task.status)
+      : false;
+
+  const handleHire = () => {
+    if (!applicant || !application) return;
+    Alert.alert(
+      'Hire applicant',
+      `Hire ${applicant.name}? The task will be marked occupied.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Hire',
+          onPress: async () => {
+            setActionLoading(true);
+            try {
+              const res = await hireApplicant(application.id);
+              Alert.alert('Success', res.message, [
+                { text: 'OK', onPress: () => navigation.goBack() },
+              ]);
+            } catch (e: any) {
+              Alert.alert('Error', e.message);
+            } finally {
+              setActionLoading(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const handleReject = () => {
-    if (!applicant) return;
-    Alert.alert(
-      'Rejected',
-      `You have rejected ${applicant.name}'s application.`,
-      [{ text: 'OK', onPress: () => navigation.goBack() }],
-    );
+    if (!applicant || !application) return;
+
+    const runReject = async (reason: string) => {
+      const msg = reason.trim();
+      if (msg.length < 3) {
+        Alert.alert('Reason required', 'Please enter at least 3 characters.');
+        return;
+      }
+      setActionLoading(true);
+      try {
+        const res = await rejectApplicant(application.id, msg);
+        Alert.alert('Rejected', res.message, [
+          { text: 'OK', onPress: () => load() },
+        ]);
+      } catch (e: any) {
+        Alert.alert('Error', e.message);
+      } finally {
+        setActionLoading(false);
+      }
+    };
+
+    if (Alert.prompt) {
+      Alert.prompt(
+        'Reject applicant',
+        `Tell ${applicant.name} why they were rejected.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Reject',
+            style: 'destructive',
+            onPress: (reason?: string) => runReject(reason ?? ''),
+          },
+        ],
+        'plain-text',
+      );
+    } else {
+      Alert.alert(
+        'Reject applicant',
+        'Text input is not available in alerts on this device. Please try on iOS or use the applicants list.',
+      );
+    }
   };
 
   if (loading) {
@@ -76,8 +142,15 @@ export function ApplicantDetailScreen() {
   }
 
   const proposedBudget = formatPeso(
-    Number(application.proposed_price ?? application.task?.price ?? 0),
+    Number(application.proposed_price ?? task?.price ?? 0),
   );
+
+  const statusLabel =
+    application.status === 'accepted'
+      ? 'Hired'
+      : application.status === 'declined'
+        ? 'Declined'
+        : 'Applied';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -93,6 +166,16 @@ export function ApplicantDetailScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
+        {task ? (
+          <View style={styles.taskBanner}>
+            <Text style={styles.taskBannerLabel}>Task</Text>
+            <Text style={styles.taskBannerTitle}>{task.title}</Text>
+            <Text style={styles.taskBannerBudget}>
+              Budget: {formatPeso(Number(task.price))}
+            </Text>
+          </View>
+        ) : null}
+
         <View style={styles.profileCard}>
           <UserAvatar
             name={applicant.name}
@@ -100,6 +183,16 @@ export function ApplicantDetailScreen() {
             size={56}
           />
           <Text style={styles.name}>{applicant.name}</Text>
+
+          <View
+            style={[
+              styles.statusBadge,
+              application.status === 'accepted' && styles.statusHired,
+              application.status === 'declined' && styles.statusDeclined,
+            ]}
+          >
+            <Text style={styles.statusBadgeText}>{statusLabel}</Text>
+          </View>
 
           <View style={styles.ratingContainer}>
             <View style={styles.ratingBadge}>
@@ -114,9 +207,16 @@ export function ApplicantDetailScreen() {
           </View>
 
           <View style={styles.budgetPill}>
-            <Text style={styles.budgetText}>{proposedBudget}</Text>
+            <Text style={styles.budgetText}>Offer: {proposedBudget}</Text>
           </View>
         </View>
+
+        {application.status === 'declined' && application.rejection_reason ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Rejection reason</Text>
+            <Text style={styles.rejectionText}>{application.rejection_reason}</Text>
+          </View>
+        ) : null}
 
         {applicant.bio ? (
           <View style={styles.section}>
@@ -151,57 +251,61 @@ export function ApplicantDetailScreen() {
           </View>
         </View>
 
-        <View style={styles.actionContainer}>
-          <Pressable
-            style={[
-              styles.button,
-              styles.hireButton,
-              hiring && styles.buttonDisabled,
-            ]}
-            onPress={handleHire}
-            disabled={hiring}
-          >
-            {hiring ? (
-              <ActivityIndicator color={colors.card} size="small" />
-            ) : (
-              <>
-                <Ionicons
-                  name="checkmark-circle"
-                  size={18}
-                  color={colors.card}
-                />
-                <Text style={styles.hireButtonText}>Hire Applicant</Text>
-              </>
-            )}
-          </Pressable>
+        {canAct ? (
+          <View style={styles.actionContainer}>
+            <Pressable
+              style={[
+                styles.button,
+                styles.hireButton,
+                actionLoading && styles.buttonDisabled,
+              ]}
+              onPress={handleHire}
+              disabled={actionLoading}
+            >
+              {actionLoading ? (
+                <ActivityIndicator color={colors.card} size="small" />
+              ) : (
+                <>
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={18}
+                    color={colors.card}
+                  />
+                  <Text style={styles.hireButtonText}>Hire Applicant</Text>
+                </>
+              )}
+            </Pressable>
 
-          <Pressable
-            style={[styles.button, styles.rejectButton]}
-            onPress={handleReject}
-          >
-            <Ionicons name="close-circle" size={18} color={colors.error} />
-            <Text style={styles.rejectButtonText}>Reject</Text>
-          </Pressable>
-        </View>
+            <Pressable
+              style={[styles.button, styles.rejectButton]}
+              onPress={handleReject}
+              disabled={actionLoading}
+            >
+              <Ionicons name="close-circle" size={18} color={colors.error} />
+              <Text style={styles.rejectButtonText}>Reject</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.resolvedBanner}>
+            <Ionicons name="information-circle" size={18} color={colors.textMuted} />
+            <Text style={styles.resolvedText}>
+              {application.status === 'accepted'
+                ? 'This applicant has been hired.'
+                : application.status === 'declined'
+                  ? 'This application was declined.'
+                  : `This task is ${formatTaskStatusLabel('occupied')} — no further actions.`}
+            </Text>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  loader: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  errorText: {
-    textAlign: 'center',
-    marginTop: 40,
-    color: colors.textMuted,
-  },
+  container: { flex: 1, backgroundColor: colors.background },
+  loader: { flex: 1, justifyContent: 'center' },
+  errorText: { textAlign: 'center', marginTop: 40, color: colors.textMuted },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -212,20 +316,25 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  backButton: {
-    padding: 8,
+  backButton: { padding: 8 },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: colors.text },
+  placeholder: { width: 40 },
+  scrollContent: { paddingHorizontal: 16, paddingVertical: 16 },
+  taskBanner: {
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  placeholder: {
-    width: 40,
-  },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+  taskBannerLabel: { fontSize: 11, color: colors.textMuted, marginBottom: 4 },
+  taskBannerTitle: { fontSize: 15, fontWeight: '700', color: colors.text },
+  taskBannerBudget: {
+    fontSize: 13,
+    color: colors.primary,
+    fontWeight: '600',
+    marginTop: 6,
   },
   profileCard: {
     backgroundColor: colors.card,
@@ -237,11 +346,16 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     gap: 8,
   },
-  name: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.text,
+  name: { fontSize: 22, fontWeight: '700', color: colors.text },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: '#ECFDF5',
   },
+  statusHired: { backgroundColor: '#EDE9FE' },
+  statusDeclined: { backgroundColor: '#FEF2F2' },
+  statusBadgeText: { fontSize: 12, fontWeight: '700', color: colors.text },
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -256,15 +370,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 12,
   },
-  ratingText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  reviewsText: {
-    fontSize: 12,
-    color: colors.textMuted,
-  },
+  ratingText: { fontSize: 14, fontWeight: '700', color: colors.text },
+  reviewsText: { fontSize: 12, color: colors.textMuted },
   budgetPill: {
     backgroundColor: colors.primary,
     paddingHorizontal: 20,
@@ -272,30 +379,17 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginTop: 8,
   },
-  budgetText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.card,
-  },
-  section: {
-    marginBottom: 24,
-  },
+  budgetText: { fontSize: 16, fontWeight: '700', color: colors.card },
+  section: { marginBottom: 24 },
   sectionTitle: {
     fontSize: 14,
     fontWeight: '700',
     color: colors.text,
     marginBottom: 12,
   },
-  bioText: {
-    fontSize: 13,
-    color: colors.textMuted,
-    lineHeight: 20,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 24,
-  },
+  bioText: { fontSize: 13, color: colors.textMuted, lineHeight: 20 },
+  rejectionText: { fontSize: 13, color: colors.error, lineHeight: 20 },
+  statsGrid: { flexDirection: 'row', gap: 12, marginBottom: 24 },
   statItem: {
     flex: 1,
     backgroundColor: colors.card,
@@ -312,11 +406,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     textAlign: 'center',
   },
-  statLabel: {
-    fontSize: 11,
-    color: colors.textMuted,
-    textAlign: 'center',
-  },
+  statLabel: { fontSize: 11, color: colors.textMuted, textAlign: 'center' },
   messageBox: {
     backgroundColor: colors.card,
     borderRadius: 12,
@@ -324,15 +414,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  messageText: {
-    fontSize: 13,
-    color: colors.textMuted,
-    lineHeight: 20,
-  },
-  actionContainer: {
-    gap: 12,
-    marginBottom: 24,
-  },
+  messageText: { fontSize: 13, color: colors.textMuted, lineHeight: 20 },
+  actionContainer: { gap: 12, marginBottom: 24 },
   button: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -342,25 +425,23 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     gap: 8,
   },
-  hireButton: {
-    backgroundColor: colors.primary,
-  },
-  hireButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.card,
-  },
+  hireButton: { backgroundColor: colors.primary },
+  hireButtonText: { fontSize: 14, fontWeight: '700', color: colors.card },
   rejectButton: {
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.error,
   },
-  rejectButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.error,
+  rejectButtonText: { fontSize: 14, fontWeight: '700', color: colors.error },
+  buttonDisabled: { opacity: 0.6 },
+  resolvedBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: 14,
+    backgroundColor: colors.tabBg,
+    borderRadius: 10,
+    marginBottom: 24,
   },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
+  resolvedText: { flex: 1, fontSize: 13, color: colors.textMuted, lineHeight: 18 },
 });

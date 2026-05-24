@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,9 +12,15 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { fetchTasks, Task } from '../api/tasks';
+import { BROWSE_CATEGORIES } from '../constants/taskCategories';
+import {
+  formatTaskStatusLabel,
+  statusBadgeStyle,
+} from '../utils/taskPermissions';
+import { NotificationBellButton } from '../components/NotificationBellButton';
 
 export function BrowseTasksScreen() {
   const navigation = useNavigation<any>();
@@ -29,23 +35,25 @@ export function BrowseTasksScreen() {
       search: searchText || undefined, 
       category: selectedCategory === 'All' ? undefined : (selectedCategory || undefined) 
     })
-      .then(res => setTasks(res.data))
+      .then((res) => setTasks(Array.isArray(res.data) ? res.data : []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [searchText, selectedCategory]);
 
-  useEffect(() => {
-    loadTasks();
-  }, [loadTasks]);
+  useFocusEffect(
+    useCallback(() => {
+      loadTasks();
+    }, [loadTasks]),
+  );
 
-  const categories = ['All', 'Cleaning', 'Delivery', 'Moving', 'Tech', 'Other'];
+  const categories = [...BROWSE_CATEGORIES];
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Browse Tasks</Text>
-        <Ionicons name="filter" size={24} color={colors.primary} />
+        <NotificationBellButton />
       </View>
 
       {/* Search */}
@@ -119,6 +127,41 @@ export function BrowseTasksScreen() {
                   <View style={styles.priceBox}>
                     <Text style={styles.price}>₱{item.price}</Text>
                   </View>
+                  {(() => {
+                    const badge =
+                      statusBadgeStyle(item.display_status ?? '') ??
+                      (item.permissions?.has_applied &&
+                      item.user_application?.status === 'accepted'
+                        ? 'hired'
+                        : item.permissions?.has_applied &&
+                            item.user_application?.status === 'declined'
+                          ? 'declined'
+                          : item.permissions?.has_applied
+                            ? 'applied'
+                            : null);
+                    if (!badge) return null;
+                    return (
+                      <View
+                        style={[
+                          styles.appliedBadge,
+                          badge === 'hired' && styles.hiredBadge,
+                          badge === 'declined' && styles.declinedBadge,
+                          badge === 'occupied' && styles.occupiedBadge,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.appliedBadgeText,
+                            badge === 'hired' && styles.hiredBadgeText,
+                            badge === 'declined' && styles.declinedBadgeText,
+                            badge === 'occupied' && styles.occupiedBadgeText,
+                          ]}
+                        >
+                          {formatTaskStatusLabel(badge)}
+                        </Text>
+                      </View>
+                    );
+                  })()}
                 </View>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.textLight} />
@@ -253,6 +296,34 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.card,
   },
+  appliedBadge: {
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.success,
+  },
+  appliedBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.success,
+  },
+  hiredBadge: {
+    backgroundColor: '#EDE9FE',
+    borderColor: colors.primary,
+  },
+  hiredBadgeText: { color: colors.primary },
+  declinedBadge: {
+    backgroundColor: '#FEF2F2',
+    borderColor: colors.error,
+  },
+  declinedBadgeText: { color: colors.error },
+  occupiedBadge: {
+    backgroundColor: colors.tabBg,
+    borderColor: colors.border,
+  },
+  occupiedBadgeText: { color: colors.textMuted },
   ratingBox: {
     flexDirection: 'row',
     alignItems: 'center',

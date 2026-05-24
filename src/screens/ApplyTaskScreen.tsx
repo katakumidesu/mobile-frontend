@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { fetchTaskDetail } from '../api/tasks';
 import { applyToTask } from '../api/applications';
@@ -24,7 +24,7 @@ export function ApplyTaskScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const taskId = route.params?.taskId as number;
-  const [bidAmount, setBidAmount] = useState('');
+  const [proposedPrice, setProposedPrice] = useState('');
   const [coverLetter, setCoverLetter] = useState('');
   const [loading, setLoading] = useState(false);
   const [taskTitle, setTaskTitle] = useState('');
@@ -33,17 +33,63 @@ export function ApplyTaskScreen() {
   const [profileName, setProfileName] = useState('');
   const [profileAvatar, setProfileAvatar] = useState<string | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [alreadyApplied, setAlreadyApplied] = useState(false);
+  const [applicationStatus, setApplicationStatus] = useState<string | null>(null);
+  const [rejectionReason, setRejectionReason] = useState<string | null>(null);
+  const [submittedBid, setSubmittedBid] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadScreen = useCallback(() => {
     if (!taskId) return;
+    setInitialLoading(true);
     Promise.all([fetchTaskDetail(taskId), fetchProfile()])
-      .then(([{ task, permissions }, profile]) => {
+      .then(([{ task, permissions, user_application, display_status }, profile]) => {
         if (permissions.is_owner) {
           Alert.alert('Not allowed', PERMISSION_MESSAGES.cannotApplyOwn, [
             { text: 'OK', onPress: () => navigation.goBack() },
           ]);
           return;
         }
+
+        setTaskTitle(task.title);
+        setTaskBudget(formatPeso(Number(task.price)));
+        setPosterName(task.user?.name ?? 'the poster');
+        setProfileName(profile.name);
+        setProfileAvatar(profile.avatar_url);
+
+        const appStatus = user_application?.status ?? permissions.application_status;
+        setApplicationStatus(appStatus ?? null);
+        setRejectionReason(user_application?.rejection_reason ?? null);
+
+        if (
+          display_status === 'hired' ||
+          appStatus === 'accepted'
+        ) {
+          setAlreadyApplied(true);
+          setSubmittedBid(
+            formatPeso(Number(user_application?.proposed_price ?? task.price)),
+          );
+          setCoverLetter(user_application?.message ?? '');
+          return;
+        }
+
+        if (display_status === 'declined' || appStatus === 'declined') {
+          setAlreadyApplied(true);
+          setSubmittedBid(
+            formatPeso(Number(user_application?.proposed_price ?? task.price)),
+          );
+          setCoverLetter(user_application?.message ?? '');
+          return;
+        }
+
+        if (permissions.has_applied || user_application) {
+          setAlreadyApplied(true);
+          setSubmittedBid(
+            formatPeso(Number(user_application?.proposed_price ?? task.price)),
+          );
+          setCoverLetter(user_application?.message ?? '');
+          return;
+        }
+
         if (!permissions.can_apply) {
           Alert.alert(
             'Not available',
@@ -52,12 +98,10 @@ export function ApplyTaskScreen() {
           );
           return;
         }
-        setTaskTitle(task.title);
-        setTaskBudget(formatPeso(Number(task.price)));
-        setBidAmount(String(Number(task.price)));
-        setPosterName(task.user?.name ?? 'the poster');
-        setProfileName(profile.name);
-        setProfileAvatar(profile.avatar_url);
+
+        setAlreadyApplied(false);
+        setProposedPrice(String(Number(task.price)));
+        setCoverLetter('');
       })
       .catch((e: Error) => {
         Alert.alert('Error', e.message);
@@ -66,14 +110,22 @@ export function ApplyTaskScreen() {
       .finally(() => setInitialLoading(false));
   }, [taskId, navigation]);
 
+  useFocusEffect(
+    useCallback(() => {
+      loadScreen();
+    }, [loadScreen]),
+  );
+
   const handleSubmit = async () => {
-    if (!bidAmount.trim() || !coverLetter.trim()) {
+    if (alreadyApplied) return;
+
+    if (!proposedPrice.trim() || !coverLetter.trim()) {
       Alert.alert('Error', 'Please fill in all required fields.');
       return;
     }
-    const proposed = parseFloat(bidAmount);
+    const proposed = parseFloat(proposedPrice);
     if (isNaN(proposed) || proposed <= 0) {
-      Alert.alert('Error', 'Enter a valid bid amount.');
+      Alert.alert('Error', 'Enter a valid proposed price.');
       return;
     }
 
@@ -83,7 +135,9 @@ export function ApplyTaskScreen() {
         message: coverLetter.trim(),
         proposed_price: proposed,
       });
-      Alert.alert('Success', result.message, [
+      setAlreadyApplied(true);
+      setSubmittedBid(formatPeso(proposed));
+      Alert.alert('Application sent', result.message, [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
     } catch (e: any) {
@@ -112,48 +166,99 @@ export function ApplyTaskScreen() {
           <View style={styles.placeholder} />
         </View>
 
-        <View style={styles.infoBanner}>
-          <Text style={styles.infoBannerText}>
-            {PERMISSION_MESSAGES.applyPrompt(posterName)}
-          </Text>
-        </View>
+        {alreadyApplied ? (
+          applicationStatus === 'accepted' ? (
+            <View style={styles.hiredBanner}>
+              <Ionicons name="ribbon" size={22} color={colors.primary} />
+              <View style={styles.appliedBannerText}>
+                <Text style={styles.hiredTitle}>Hired!</Text>
+                <Text style={styles.appliedSubtitle}>
+                  You were hired for this task. Check Notifications for updates.
+                </Text>
+                {submittedBid ? (
+                  <Text style={styles.appliedBid}>Your offer: {submittedBid}</Text>
+                ) : null}
+              </View>
+            </View>
+          ) : applicationStatus === 'declined' ? (
+            <View style={styles.declinedBanner}>
+              <Ionicons name="close-circle" size={22} color={colors.error} />
+              <View style={styles.appliedBannerText}>
+                <Text style={styles.declinedTitle}>Declined</Text>
+                <Text style={styles.appliedSubtitle}>
+                  {rejectionReason ?? 'Your application was not selected.'}
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.appliedBanner}>
+              <Ionicons name="checkmark-circle" size={22} color={colors.success} />
+              <View style={styles.appliedBannerText}>
+                <Text style={styles.appliedTitle}>Applied</Text>
+                <Text style={styles.appliedSubtitle}>
+                  Waiting for {posterName} to review your application.
+                </Text>
+                {submittedBid ? (
+                  <Text style={styles.appliedBid}>Your offer: {submittedBid}</Text>
+                ) : null}
+              </View>
+            </View>
+          )
+        ) : (
+          <View style={styles.infoBanner}>
+            <Text style={styles.infoBannerText}>
+              {PERMISSION_MESSAGES.applyPrompt(posterName)}
+            </Text>
+          </View>
+        )}
 
         <View style={styles.taskInfoSection}>
           <Text style={styles.emoji}>📝</Text>
           <Text style={styles.taskTitle}>{taskTitle}</Text>
-          <Text style={styles.budget}>Budget: {taskBudget}</Text>
+          <Text style={styles.budget}>Poster&apos;s budget: {taskBudget}</Text>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Your Bid (₱)</Text>
-          <View style={styles.bidContainer}>
-            <View style={styles.inputGroup}>
-              <Text style={styles.currencySymbol}>₱</Text>
+        {!alreadyApplied && (
+          <>
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Your proposed price (₱) *</Text>
+              <Text style={styles.helperText}>
+                This is the amount you want to be paid to complete the task. It can
+                match the poster&apos;s budget or be your own offer.
+              </Text>
+              <View style={styles.bidContainer}>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.currencySymbol}>₱</Text>
+                  <TextInput
+                    style={styles.bidInput}
+                    placeholder="Enter your price"
+                    value={proposedPrice}
+                    onChangeText={setProposedPrice}
+                    keyboardType="decimal-pad"
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Message to poster *</Text>
+              <Text style={styles.helperText}>
+                Explain why you&apos;re a good fit and when you can do the work.
+              </Text>
               <TextInput
-                style={styles.bidInput}
-                placeholder="Enter your bid"
-                value={bidAmount}
-                onChangeText={setBidAmount}
-                keyboardType="decimal-pad"
+                style={[styles.input, styles.textArea]}
+                placeholder="I can start tomorrow and have done similar tasks before..."
+                value={coverLetter}
+                onChangeText={setCoverLetter}
+                multiline
+                numberOfLines={5}
                 placeholderTextColor={colors.textLight}
+                textAlignVertical="top"
               />
             </View>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Cover Letter</Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder="Explain why you're the right person for this task..."
-            value={coverLetter}
-            onChangeText={setCoverLetter}
-            multiline
-            numberOfLines={5}
-            placeholderTextColor={colors.textLight}
-            textAlignVertical="top"
-          />
-        </View>
+          </>
+        )}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Your Profile</Text>
@@ -164,22 +269,34 @@ export function ApplyTaskScreen() {
         </View>
 
         <View style={styles.buttonContainer}>
-          <Pressable
-            style={[styles.submitButton, loading && styles.submitButtonDisabled]}
-            onPress={handleSubmit}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color={colors.card} />
-            ) : (
-              <>
-                <Ionicons name="send" size={18} color={colors.card} />
-                <Text style={styles.submitButtonText}>Submit Application</Text>
-              </>
-            )}
-          </Pressable>
+          {alreadyApplied ? (
+            <Pressable style={styles.appliedButton} disabled>
+              <Text style={styles.appliedButtonText}>
+                {applicationStatus === 'accepted'
+                  ? 'Hired — Task occupied'
+                  : applicationStatus === 'declined'
+                    ? 'Application declined'
+                    : 'Applied — Waiting for confirmation'}
+              </Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+              onPress={handleSubmit}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color={colors.card} />
+              ) : (
+                <>
+                  <Ionicons name="send" size={18} color={colors.card} />
+                  <Text style={styles.submitButtonText}>Submit Application</Text>
+                </>
+              )}
+            </Pressable>
+          )}
           <Pressable style={styles.cancelButton} onPress={() => navigation.goBack()}>
-            <Text style={styles.cancelButtonText}>Cancel</Text>
+            <Text style={styles.cancelButtonText}>Back</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -188,10 +305,7 @@ export function ApplyTaskScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
+  container: { flex: 1, backgroundColor: colors.background },
   loader: { flex: 1, justifyContent: 'center' },
   header: {
     flexDirection: 'row',
@@ -204,11 +318,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   backButton: { padding: 8 },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
-  },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: colors.text },
   placeholder: { width: 40 },
   infoBanner: {
     margin: 16,
@@ -216,11 +326,46 @@ const styles = StyleSheet.create({
     backgroundColor: '#E6FFFA',
     borderRadius: 10,
   },
-  infoBannerText: {
-    fontSize: 12,
-    color: colors.text,
-    lineHeight: 18,
+  infoBannerText: { fontSize: 12, color: colors.text, lineHeight: 18 },
+  appliedBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    margin: 16,
+    padding: 14,
+    backgroundColor: '#ECFDF5',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.success,
   },
+  appliedBannerText: { flex: 1 },
+  appliedTitle: { fontSize: 15, fontWeight: '700', color: colors.success },
+  hiredBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    margin: 16,
+    padding: 14,
+    backgroundColor: '#EDE9FE',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
+  },
+  hiredTitle: { fontSize: 15, fontWeight: '700', color: colors.primary },
+  declinedBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    margin: 16,
+    padding: 14,
+    backgroundColor: '#FEF2F2',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.error,
+  },
+  declinedTitle: { fontSize: 15, fontWeight: '700', color: colors.error },
+  appliedSubtitle: { fontSize: 12, color: colors.textMuted, marginTop: 4 },
+  appliedBid: { fontSize: 13, fontWeight: '600', color: colors.text, marginTop: 6 },
   taskInfoSection: {
     alignItems: 'center',
     paddingVertical: 24,
@@ -232,23 +377,15 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   emoji: { fontSize: 48, marginBottom: 12 },
-  taskTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  budget: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.primary,
-    marginTop: 8,
-  },
+  taskTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
+  budget: { fontSize: 14, color: colors.primary, marginTop: 8, fontWeight: '600' },
   section: { marginHorizontal: 16, marginBottom: 24 },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 8,
+  sectionTitle: { fontSize: 14, fontWeight: '700', color: colors.text, marginBottom: 6 },
+  helperText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    lineHeight: 18,
+    marginBottom: 10,
   },
   bidContainer: {
     backgroundColor: colors.card,
@@ -298,11 +435,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     gap: 12,
   },
-  profileName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-  },
+  profileName: { fontSize: 14, fontWeight: '600', color: colors.text },
   buttonContainer: {
     paddingHorizontal: 16,
     paddingBottom: 24,
@@ -318,10 +451,19 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   submitButtonDisabled: { opacity: 0.6 },
-  submitButtonText: {
+  submitButtonText: { fontSize: 14, fontWeight: '700', color: colors.card },
+  appliedButton: {
+    backgroundColor: colors.tabBg,
+    borderRadius: 20,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  appliedButtonText: {
     fontSize: 14,
-    fontWeight: '700',
-    color: colors.card,
+    fontWeight: '600',
+    color: colors.textMuted,
   },
   cancelButton: {
     backgroundColor: colors.card,
@@ -331,9 +473,5 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
   },
-  cancelButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.text,
-  },
+  cancelButtonText: { fontSize: 13, fontWeight: '600', color: colors.text },
 });

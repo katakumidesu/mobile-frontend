@@ -20,6 +20,7 @@ import { formatPeso } from '../utils/currency';
 
 const profileMenuItems = [
   { icon: 'person', label: 'Edit Profile', route: 'EditProfile' },
+  { icon: 'notifications', label: 'Notifications', route: 'Notifications' },
   { icon: 'star', label: 'Ratings & Reviews', route: 'Ratings' },
   { icon: 'settings', label: 'Settings', route: 'Settings' },
   { icon: 'help-circle', label: 'Help & Support', route: 'Help' },
@@ -123,7 +124,9 @@ export function ProfileScreen() {
               onPress={() => {
                 if (item.route === 'Logout') {
                   handleLogoutPress();
-                } else if (['EditProfile', 'Ratings'].includes(item.route)) {
+                } else if (
+                  ['EditProfile', 'Ratings', 'Notifications'].includes(item.route)
+                ) {
                   navigation.navigate(item.route);
                 } else {
                   Alert.alert(

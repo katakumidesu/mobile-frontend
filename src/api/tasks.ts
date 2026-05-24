@@ -2,6 +2,16 @@ import { API_BASE_URL } from '../config';
 import { getStoredToken } from './auth';
 import type { TaskPermissions } from '../utils/taskPermissions';
 
+export type UserApplication = {
+  id: number;
+  status: 'applied' | 'pending' | 'accepted' | 'declined';
+  proposed_price: string;
+  message?: string;
+  rejection_reason?: string | null;
+  responded_at?: string | null;
+  created_at: string | null;
+};
+
 export type Task = {
   id: number;
   user_id: number;
@@ -10,15 +20,37 @@ export type Task = {
   price: string;
   location: string;
   deadline: string | null;
-  status: 'open' | 'in_progress' | 'completed' | 'paid';
+  status: 'open' | 'occupied' | 'in_progress' | 'completed' | 'paid' | 'applied';
   category: string | null;
   created_at: string;
   user?: { id: number; name: string };
+  user_application?: UserApplication | null;
+  display_status?: string;
+  permissions?: import('../utils/taskPermissions').TaskPermissions;
+};
+
+export type HiredWorker = {
+  application_id: number;
+  user: {
+    id: number;
+    name: string;
+    avatar_url: string | null;
+    average_rating: number;
+    review_count: number;
+  };
 };
 
 export type TaskDetailResponse = {
   task: Task;
   permissions: TaskPermissions;
+  user_application: UserApplication | null;
+  display_status: string;
+  hired_worker?: HiredWorker | null;
+};
+
+export type CompleteTaskPayload = {
+  rating: number;
+  comment: string;
 };
 
 export type UpdateTaskPayload = {
@@ -139,6 +171,19 @@ export async function updateTask(
     body: JSON.stringify(payload),
   });
   return parseJson<TaskDetailResponse>(response);
+}
+
+export async function completeTask(
+  id: number,
+  payload: CompleteTaskPayload,
+): Promise<{ message: string; task: Task }> {
+  const headers = await authHeaders();
+  const response = await safeFetch(`${API_BASE_URL}/api/tasks/${id}/complete`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  return parseJson<{ message: string; task: Task }>(response);
 }
 
 export async function deleteTask(id: number): Promise<void> {

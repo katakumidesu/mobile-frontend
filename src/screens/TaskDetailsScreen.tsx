@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -10,12 +10,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { fetchTaskDetail } from '../api/tasks';
 import type { Task } from '../api/tasks';
 import type { TaskPermissions } from '../utils/taskPermissions';
-import { PERMISSION_MESSAGES } from '../utils/taskPermissions';
+import { PERMISSION_MESSAGES, formatTaskStatusLabel } from '../utils/taskPermissions';
 import { formatPeso } from '../utils/currency';
 import { UserAvatar } from '../components/UserAvatar';
 
@@ -25,14 +25,17 @@ export function TaskDetailsScreen() {
   const taskId = route.params?.taskId as number;
   const [task, setTask] = useState<Task | null>(null);
   const [permissions, setPermissions] = useState<TaskPermissions | null>(null);
+  const [displayStatus, setDisplayStatus] = useState('open');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const loadTask = useCallback(() => {
     if (!taskId) return;
+    setLoading(true);
     fetchTaskDetail(taskId)
-      .then(({ task: t, permissions: p }) => {
+      .then(({ task: t, permissions: p, display_status }) => {
         setTask(t);
         setPermissions(p);
+        setDisplayStatus(display_status);
       })
       .catch((e: Error) => {
         Alert.alert('Error', e.message);
@@ -40,6 +43,12 @@ export function TaskDetailsScreen() {
       })
       .finally(() => setLoading(false));
   }, [taskId, navigation]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadTask();
+    }, [loadTask]),
+  );
 
   if (loading || !task || !permissions) {
     return (
@@ -50,6 +59,15 @@ export function TaskDetailsScreen() {
   }
 
   const posterName = task.user?.name ?? 'Unknown';
+  const statusLabel = formatTaskStatusLabel(displayStatus);
+  const isHired =
+    displayStatus === 'hired' || permissions.application_status === 'accepted';
+  const isDeclined =
+    displayStatus === 'declined' || permissions.application_status === 'declined';
+  const isAppliedView =
+    displayStatus === 'applied' ||
+    (permissions.has_applied && !isHired && !isDeclined);
+  const rejectionReason = task.user_application?.rejection_reason;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -66,6 +84,38 @@ export function TaskDetailsScreen() {
           <View style={styles.bannerOwner}>
             <Ionicons name="shield-checkmark" size={18} color={colors.primary} />
             <Text style={styles.bannerText}>{PERMISSION_MESSAGES.ownerPrompt}</Text>
+          </View>
+        ) : isHired ? (
+          <View style={styles.bannerHired}>
+            <Ionicons name="ribbon" size={18} color={colors.primary} />
+            <Text style={styles.bannerText}>
+              You were hired for this task! Check your notifications for details.
+            </Text>
+          </View>
+        ) : isDeclined ? (
+          <View style={styles.bannerDeclined}>
+            <Ionicons name="close-circle" size={18} color={colors.error} />
+            <Text style={styles.bannerText}>
+              Your application was not selected.
+              {rejectionReason ? ` Reason: ${rejectionReason}` : ''}
+            </Text>
+          </View>
+        ) : isAppliedView ? (
+          <View style={styles.bannerApplied}>
+            <Ionicons name="checkmark-circle" size={18} color={colors.success} />
+            <Text style={styles.bannerText}>
+              You applied for this task. The poster will review your offer
+              {task.user_application?.proposed_price
+                ? ` of ${formatPeso(Number(task.user_application.proposed_price))}`
+                : ''}
+              .
+            </Text>
+          </View>
+        ) : displayStatus === 'occupied' ? (
+          <View style={styles.closedBanner}>
+            <Text style={styles.closedText}>
+              This task is occupied — someone was already hired.
+            </Text>
           </View>
         ) : (
           <View style={styles.bannerApplicant}>
@@ -96,8 +146,17 @@ export function TaskDetailsScreen() {
               <Text style={styles.priceValue}>{formatPeso(Number(task.price))}</Text>
             </View>
             <View style={styles.priceBox}>
-              <Text style={styles.priceLabel}>Status</Text>
-              <Text style={styles.priceValue}>{task.status.replace('_', ' ')}</Text>
+              <Text style={styles.priceLabel}>Your status</Text>
+              <Text
+                style={[
+                  styles.priceValue,
+                  isAppliedView && styles.statusApplied,
+                  isHired && styles.statusHired,
+                  isDeclined && styles.statusDeclined,
+                ]}
+              >
+                {statusLabel}
+              </Text>
             </View>
           </View>
 
@@ -146,6 +205,20 @@ export function TaskDetailsScreen() {
                 </Pressable>
               )}
             </>
+          ) : isHired ? (
+            <Pressable style={[styles.button, styles.hiredButton]} disabled>
+              <Text style={styles.hiredButtonText}>Hired — Task in progress</Text>
+            </Pressable>
+          ) : isDeclined ? (
+            <Pressable style={[styles.button, styles.declinedButton]} disabled>
+              <Text style={styles.declinedButtonText}>Application declined</Text>
+            </Pressable>
+          ) : isAppliedView ? (
+            <Pressable style={[styles.button, styles.appliedButton]} disabled>
+              <Text style={styles.appliedButtonText}>
+                Applied — Waiting for confirmation
+              </Text>
+            </Pressable>
           ) : permissions.can_apply ? (
             <Pressable
               style={[styles.button, styles.primaryButton]}
@@ -169,14 +242,8 @@ export function TaskDetailsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  loader: {
-    flex: 1,
-    justifyContent: 'center',
-  },
+  container: { flex: 1, backgroundColor: colors.background },
+  loader: { flex: 1, justifyContent: 'center' },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -188,11 +255,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   backButton: { padding: 8 },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
-  },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: colors.text },
   placeholder: { width: 40 },
   bannerOwner: {
     flexDirection: 'row',
@@ -218,12 +281,43 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.success,
   },
-  bannerText: {
-    flex: 1,
-    fontSize: 12,
-    color: colors.text,
-    lineHeight: 18,
+  bannerApplied: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    margin: 16,
+    marginBottom: 0,
+    padding: 12,
+    backgroundColor: '#ECFDF5',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.success,
   },
+  bannerHired: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    margin: 16,
+    marginBottom: 0,
+    padding: 12,
+    backgroundColor: '#EDE9FE',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
+  },
+  bannerDeclined: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    margin: 16,
+    marginBottom: 0,
+    padding: 12,
+    backgroundColor: '#FEF2F2',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.error,
+  },
+  bannerText: { flex: 1, fontSize: 12, color: colors.text, lineHeight: 18 },
   imageContainer: {
     height: 120,
     backgroundColor: colors.card,
@@ -234,15 +328,8 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   largeEmoji: { fontSize: 56 },
-  contentContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.text,
-  },
+  contentContainer: { paddingHorizontal: 16, paddingVertical: 20 },
+  title: { fontSize: 22, fontWeight: '700', color: colors.text },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -250,19 +337,9 @@ const styles = StyleSheet.create({
     marginTop: 8,
     flexWrap: 'wrap',
   },
-  location: {
-    fontSize: 13,
-    color: colors.textMuted,
-  },
-  category: {
-    fontSize: 13,
-    color: colors.textMuted,
-  },
-  priceSection: {
-    flexDirection: 'row',
-    gap: 12,
-    marginVertical: 20,
-  },
+  location: { fontSize: 13, color: colors.textMuted },
+  category: { fontSize: 13, color: colors.textMuted },
+  priceSection: { flexDirection: 'row', gap: 12, marginVertical: 20 },
   priceBox: {
     flex: 1,
     backgroundColor: colors.card,
@@ -272,17 +349,16 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     alignItems: 'center',
   },
-  priceLabel: {
-    fontSize: 11,
-    color: colors.textMuted,
-    marginBottom: 4,
-  },
+  priceLabel: { fontSize: 11, color: colors.textMuted, marginBottom: 4 },
   priceValue: {
     fontSize: 14,
     fontWeight: '700',
     color: colors.primary,
-    textTransform: 'capitalize',
+    textAlign: 'center',
   },
+  statusApplied: { color: colors.success },
+  statusHired: { color: colors.primary },
+  statusDeclined: { color: colors.error },
   section: { marginBottom: 20 },
   sectionTitle: {
     fontSize: 14,
@@ -290,11 +366,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: 8,
   },
-  description: {
-    fontSize: 13,
-    color: colors.textMuted,
-    lineHeight: 20,
-  },
+  description: { fontSize: 13, color: colors.textMuted, lineHeight: 20 },
   posterCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -306,16 +378,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   posterInfo: { flex: 1 },
-  posterName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  posterMeta: {
-    fontSize: 12,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
+  posterName: { fontSize: 14, fontWeight: '600', color: colors.text },
+  posterMeta: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   button: {
     flexDirection: 'row',
     borderRadius: 10,
@@ -327,11 +391,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   primaryButton: { backgroundColor: colors.primary },
-  buttonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.card,
-  },
+  buttonText: { fontSize: 16, fontWeight: '700', color: colors.card },
   secondaryButton: {
     backgroundColor: colors.card,
     borderWidth: 1,
@@ -342,15 +402,41 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.primary,
   },
+  appliedButton: {
+    backgroundColor: colors.tabBg,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  appliedButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  hiredButton: {
+    backgroundColor: '#EDE9FE',
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
+  },
+  hiredButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  declinedButton: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: colors.error,
+  },
+  declinedButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.error,
+  },
   closedBanner: {
     padding: 14,
     backgroundColor: colors.tabBg,
     borderRadius: 10,
     alignItems: 'center',
   },
-  closedText: {
-    fontSize: 13,
-    color: colors.textMuted,
-    textAlign: 'center',
-  },
+  closedText: { fontSize: 13, color: colors.textMuted, textAlign: 'center' },
 });

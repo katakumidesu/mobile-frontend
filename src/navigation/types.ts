@@ -15,6 +15,7 @@ export type AppTabParamList = {
 
 export type HomeStackParamList = {
   Dashboard: undefined;
+  Notifications: undefined;
   TaskDetails: { taskId: number };
   WorkerProfile: { workerId: number };
 };
@@ -26,10 +27,12 @@ export type BrowseStackParamList = {
 };
 
 export type PostStackParamList = {
-  PostForm: undefined;
+  PostForm: { mode: 'create'; resetAt?: number } | undefined;
+  EditTask: { taskId: number; mode: 'edit' };
   ManageTask: { taskId: number };
   TaskApplications: { taskId: number };
-  ApplicantDetail: { applicantId: number };
+  ApplicantDetail: { applicationId: number };
+  CompleteTask: { taskId: number };
 };
 
 export type ProfileStackParamList = {

@@ -8,55 +8,82 @@ import {
   TextInput,
   Switch,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Alert } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { colors } from '../theme/colors';
-import { createTask } from '../api/tasks';
+import { fetchTaskDetail, updateTask } from '../api/tasks';
+import { PERMISSION_MESSAGES } from '../utils/taskPermissions';
+
 import { TASK_CATEGORIES } from '../constants/taskCategories';
 
-const EMPTY_FORM = {
-  title: '',
-  description: '',
-  category: '',
-  budget: '',
-  location: '',
-  isRemote: false,
-  deadline: '',
-};
+const CATEGORIES = [...TASK_CATEGORIES];
 
-/** CREATE-only screen. Editing is handled by EditTaskScreen. */
-export function PostTaskScreen() {
+export function EditTaskScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const [title, setTitle] = useState(EMPTY_FORM.title);
-  const [description, setDescription] = useState(EMPTY_FORM.description);
-  const [category, setCategory] = useState(EMPTY_FORM.category);
-  const [budget, setBudget] = useState(EMPTY_FORM.budget);
-  const [location, setLocation] = useState(EMPTY_FORM.location);
-  const [isRemote, setIsRemote] = useState(EMPTY_FORM.isRemote);
-  const [deadline, setDeadline] = useState(EMPTY_FORM.deadline);
-  const [loading, setLoading] = useState(false);
+  const taskId = route.params?.taskId as number;
 
-  const resetForm = useCallback(() => {
-    setTitle(EMPTY_FORM.title);
-    setDescription(EMPTY_FORM.description);
-    setCategory(EMPTY_FORM.category);
-    setBudget(EMPTY_FORM.budget);
-    setLocation(EMPTY_FORM.location);
-    setIsRemote(EMPTY_FORM.isRemote);
-    setDeadline(EMPTY_FORM.deadline);
-  }, []);
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [category, setCategory] = useState('');
+  const [budget, setBudget] = useState('');
+  const [location, setLocation] = useState('');
+  const [isRemote, setIsRemote] = useState(false);
+  const [deadline, setDeadline] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+
+  const loadTask = useCallback(() => {
+    if (!taskId) {
+      Alert.alert('Error', 'No task selected to edit.');
+      navigation.goBack();
+      return;
+    }
+
+    setInitialLoading(true);
+    fetchTaskDetail(taskId)
+      .then(({ task, permissions }) => {
+        if (!permissions.is_owner) {
+          Alert.alert('Access denied', PERMISSION_MESSAGES.notOwner, [
+            { text: 'OK', onPress: () => navigation.goBack() },
+          ]);
+          return;
+        }
+        if (!permissions.can_edit) {
+          Alert.alert(
+            'Not allowed',
+            'This task can no longer be edited while in progress.',
+            [{ text: 'OK', onPress: () => navigation.goBack() }],
+          );
+          return;
+        }
+
+        setTitle(task.title);
+        setDescription(task.description);
+        setCategory(task.category ?? '');
+        setBudget(String(Number(task.price)));
+        const remote = task.location === 'Remote';
+        setIsRemote(remote);
+        setLocation(remote ? '' : task.location);
+        setDeadline(task.deadline ? task.deadline.slice(0, 10) : '');
+      })
+      .catch((e: Error) => {
+        Alert.alert('Error', e.message);
+        navigation.goBack();
+      })
+      .finally(() => setInitialLoading(false));
+  }, [taskId, navigation]);
 
   useFocusEffect(
     useCallback(() => {
-      resetForm();
-    }, [resetForm, route.params?.resetAt]),
+      loadTask();
+    }, [loadTask]),
   );
 
-  const handleSubmit = async () => {
+  const handleSave = async () => {
     if (!title.trim() || !description.trim() || !budget.trim()) {
       Alert.alert('Error', 'Please fill in all required fields.');
       return;
@@ -70,48 +97,59 @@ export function PostTaskScreen() {
 
     setLoading(true);
     try {
-      await createTask({
+      await updateTask(taskId, {
         title: title.trim(),
         description: description.trim(),
         price: priceNum,
-        location: isRemote ? 'Remote' : (location.trim() || 'Not specified'),
+        location: isRemote ? 'Remote' : location.trim() || 'Not specified',
         category: category || null,
         deadline: deadline.trim() || null,
       });
 
-      Alert.alert('Success', 'Task posted successfully!', [
+      Alert.alert('Saved', 'Your task was updated successfully.', [
         {
           text: 'OK',
-          onPress: () => {
-            resetForm();
-            navigation.navigate('Home');
-          },
+          onPress: () =>
+            navigation.navigate('Post', {
+              screen: 'ManageTask',
+              params: { taskId },
+            }),
         },
       ]);
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to post task.');
+      Alert.alert('Error', e.message || 'Failed to update task.');
     } finally {
       setLoading(false);
     }
   };
 
-  const categories = [...TASK_CATEGORIES];
+  if (initialLoading) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ActivityIndicator size="large" color={colors.primary} style={styles.loader} />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <Text style={styles.title}>Post a Task</Text>
-          <Text style={styles.subtitle}>
-            Describe what you need help with and set your budget
-          </Text>
+          <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="chevron-back" size={24} color={colors.text} />
+          </Pressable>
+          <Text style={styles.headerTitle}>Edit Task</Text>
+          <View style={styles.placeholder} />
         </View>
+
+        <Text style={styles.subtitle}>
+          Update your published task. Changes apply only to this task.
+        </Text>
 
         <View style={styles.section}>
           <Text style={styles.label}>Task Title *</Text>
           <TextInput
             style={styles.input}
-            placeholder="e.g., Help with house cleaning"
             value={title}
             onChangeText={setTitle}
             placeholderTextColor={colors.textLight}
@@ -122,20 +160,19 @@ export function PostTaskScreen() {
           <Text style={styles.label}>Description *</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
-            placeholder="Provide details about your task..."
             value={description}
             onChangeText={setDescription}
             multiline
             numberOfLines={4}
-            placeholderTextColor={colors.textLight}
             textAlignVertical="top"
+            placeholderTextColor={colors.textLight}
           />
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.label}>Category *</Text>
+          <Text style={styles.label}>Category</Text>
           <View style={styles.categoryGrid}>
-            {categories.map((cat) => (
+            {CATEGORIES.map((cat) => (
               <Pressable
                 key={cat}
                 style={[
@@ -161,7 +198,6 @@ export function PostTaskScreen() {
           <Text style={styles.label}>Budget (₱) *</Text>
           <TextInput
             style={styles.input}
-            placeholder="0"
             value={budget}
             onChangeText={setBudget}
             keyboardType="decimal-pad"
@@ -177,10 +213,7 @@ export function PostTaskScreen() {
               <Switch
                 value={isRemote}
                 onValueChange={setIsRemote}
-                trackColor={{
-                  false: colors.border,
-                  true: colors.primary,
-                }}
+                trackColor={{ false: colors.border, true: colors.primary }}
                 thumbColor={colors.card}
               />
             </View>
@@ -188,77 +221,60 @@ export function PostTaskScreen() {
           {!isRemote && (
             <TextInput
               style={styles.input}
-              placeholder="Enter location"
               value={location}
               onChangeText={setLocation}
               placeholderTextColor={colors.textLight}
             />
           )}
-          <Text style={styles.helperText}>
-            {isRemote
-              ? 'This task can be done from anywhere'
-              : 'Specify where the task needs to be done'}
-          </Text>
         </View>
 
         <View style={styles.section}>
           <Text style={styles.label}>Deadline</Text>
           <TextInput
             style={styles.input}
-            placeholder="Select a deadline"
             value={deadline}
             onChangeText={setDeadline}
+            placeholder="YYYY-MM-DD"
             placeholderTextColor={colors.textLight}
           />
         </View>
 
         <Pressable
           style={[styles.submitButton, loading && styles.submitButtonDisabled]}
-          onPress={handleSubmit}
+          onPress={handleSave}
           disabled={loading}
         >
           {loading ? (
             <ActivityIndicator color={colors.card} />
           ) : (
-            <>
-              <Text style={styles.submitButtonText}>Post Task</Text>
-              <Ionicons name="arrow-forward" size={18} color={colors.card} />
-            </>
+            <Text style={styles.submitButtonText}>Save Changes</Text>
           )}
         </Pressable>
-
-        <View style={styles.spacer} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  scrollView: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
+  container: { flex: 1, backgroundColor: colors.background },
+  loader: { flex: 1, justifyContent: 'center' },
+  scrollView: { flex: 1, paddingHorizontal: 16 },
   header: {
-    marginTop: 20,
-    marginBottom: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    marginBottom: 8,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: colors.text,
-  },
+  backButton: { padding: 8 },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
+  placeholder: { width: 40 },
   subtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: colors.textMuted,
-    marginTop: 8,
+    marginBottom: 20,
   },
-  section: {
-    marginBottom: 24,
-  },
+  section: { marginBottom: 20 },
   label: {
     fontSize: 14,
     fontWeight: '600',
@@ -275,15 +291,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.text,
   },
-  textArea: {
-    minHeight: 100,
-    paddingTop: 12,
-  },
-  categoryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
+  textArea: { minHeight: 100, paddingTop: 12 },
+  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   categoryItem: {
     minWidth: 72,
     paddingVertical: 10,
@@ -292,62 +301,29 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
-    justifyContent: 'center',
     alignItems: 'center',
   },
   categoryItemActive: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
-  categoryItemText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  categoryItemTextActive: {
-    color: colors.card,
-  },
+  categoryItemText: { fontSize: 13, fontWeight: '600', color: colors.text },
+  categoryItemTextActive: { color: colors.card },
   locationHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
   },
-  remoteToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  remoteLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textMuted,
-  },
-  helperText: {
-    fontSize: 12,
-    color: colors.textLight,
-    marginTop: 8,
-  },
+  remoteToggle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  remoteLabel: { fontSize: 12, fontWeight: '600', color: colors.textMuted },
   submitButton: {
-    flexDirection: 'row',
     backgroundColor: colors.primary,
     borderRadius: 12,
     paddingVertical: 14,
-    paddingHorizontal: 16,
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginBottom: 12,
+    marginBottom: 24,
   },
-  submitButtonDisabled: {
-    opacity: 0.6,
-  },
-  submitButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.card,
-  },
-  spacer: {
-    height: 24,
-  },
+  submitButtonDisabled: { opacity: 0.6 },
+  submitButtonText: { fontSize: 16, fontWeight: '700', color: colors.card },
 });

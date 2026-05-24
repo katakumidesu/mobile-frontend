@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { useAuth } from '../context/AuthContext';
 import { fetchTasks, Task } from '../api/tasks';
@@ -20,6 +20,8 @@ import {
   DashboardStats,
 } from '../api/dashboard';
 import { UserAvatar } from '../components/UserAvatar';
+import { openCreateTaskForm } from '../navigation/taskNavigation';
+import { fetchNotifications } from '../api/notifications';
 
 export function DashboardScreen() {
   const { user } = useAuth();
@@ -30,12 +32,18 @@ export function DashboardScreen() {
   const [applicants, setApplicants] = useState<RecentApplicant[]>([]);
   const [loading, setLoading] = useState(true);
   const [applicantsLoading, setApplicantsLoading] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  useEffect(() => {
+  const loadDashboard = useCallback(() => {
+    setLoading(true);
+    setApplicantsLoading(true);
     Promise.all([
-      fetchTasks({ mine: true }).then((res) => setTasks(res.data.slice(0, 3))),
+      fetchTasks({ mine: true }).then((res) =>
+        setTasks(Array.isArray(res.data) ? res.data.slice(0, 3) : []),
+      ),
       fetchDashboardStats().then(setStats),
       fetchRecentApplicants().then(setApplicants),
+      fetchNotifications().then((res) => setUnreadCount(res.unread_count)),
     ])
       .catch(() => {})
       .finally(() => {
@@ -43,6 +51,12 @@ export function DashboardScreen() {
         setApplicantsLoading(false);
       });
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadDashboard();
+    }, [loadDashboard]),
+  );
 
   const firstApplicantTaskId = applicants[0]?.task_id;
 
@@ -54,8 +68,23 @@ export function DashboardScreen() {
             <Text style={styles.greeting}>Good Morning,</Text>
             <Text style={styles.userName}>{firstName}</Text>
           </View>
-          <View style={styles.profileIcon}>
-            <Ionicons name="person-circle" size={48} color={colors.primary} />
+          <View style={styles.headerActions}>
+            <Pressable
+              style={styles.bellButton}
+              onPress={() => navigation.navigate('Notifications')}
+            >
+              <Ionicons name="notifications" size={26} color={colors.primary} />
+              {unreadCount > 0 ? (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </Text>
+                </View>
+              ) : null}
+            </Pressable>
+            <View style={styles.profileIcon}>
+              <Ionicons name="person-circle" size={48} color={colors.primary} />
+            </View>
           </View>
         </View>
 
@@ -88,7 +117,7 @@ export function DashboardScreen() {
               styles.actionPrimary,
               pressed && styles.buttonPressed,
             ]}
-            onPress={() => navigation.navigate('Post')}
+            onPress={() => openCreateTaskForm(navigation)}
           >
             <Ionicons name="add-circle" size={32} color={colors.card} />
             <Text style={styles.actionTitle}>Post a Task</Text>
@@ -256,6 +285,31 @@ const styles = StyleSheet.create({
   },
   profileIcon: {
     borderRadius: 24,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  bellButton: {
+    padding: 8,
+  },
+  badge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.error,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.card,
   },
   statsContainer: {
     flexDirection: 'row',
