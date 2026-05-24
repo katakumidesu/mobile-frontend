@@ -20,6 +20,7 @@ import {
   TaskApplication,
 } from '../api/applications';
 import { UserAvatar } from '../components/UserAvatar';
+import { RejectReasonModal } from '../components/RejectReasonModal';
 import { formatPeso } from '../utils/currency';
 import { formatTaskStatusLabel } from '../utils/taskPermissions';
 
@@ -66,6 +67,8 @@ export function TaskApplicationsScreen() {
   const [taskTitle, setTaskTitle] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<TaskApplication | null>(null);
+  const [rejectLoading, setRejectLoading] = useState(false);
 
   const load = useCallback(() => {
     if (!taskId) return;
@@ -90,44 +93,19 @@ export function TaskApplicationsScreen() {
 
   const taskLocked = taskStatus !== 'open';
 
-  const handleReject = (item: TaskApplication) => {
-    const runReject = async (reason: string) => {
-      const msg = reason.trim();
-      if (msg.length < 3) {
-        Alert.alert('Reason required', 'Please enter at least 3 characters.');
-        return;
-      }
-      try {
-        setActionLoadingId(item.id);
-        const res = await rejectApplicant(item.id, msg);
-        Alert.alert('Rejected', res.message);
-        load();
-      } catch (e: any) {
-        Alert.alert('Error', e.message);
-      } finally {
-        setActionLoadingId(null);
-      }
-    };
-
-    if (Alert.prompt) {
-      Alert.prompt(
-        'Reject applicant',
-        `Tell ${item.applicant.name} why they were rejected.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Reject',
-            style: 'destructive',
-            onPress: (reason?: string) => runReject(reason ?? ''),
-          },
-        ],
-        'plain-text',
-      );
-    } else {
-      Alert.alert(
-        'Reject applicant',
-        'Open this applicant from Notifications to reject with a reason, or use a device that supports text input in alerts.',
-      );
+  const submitReject = async (reason: string) => {
+    if (!rejectTarget) return;
+    setRejectLoading(true);
+    try {
+      const res = await rejectApplicant(rejectTarget.id, reason);
+      setRejectTarget(null);
+      Alert.alert('Rejected', res.message);
+      load();
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setRejectLoading(false);
+      setActionLoadingId(null);
     }
   };
 
@@ -169,14 +147,14 @@ export function TaskApplicationsScreen() {
             const canAct = canRespondToApplication(item.status, taskStatus);
 
             return (
-              <Pressable
-                style={styles.applicantCard}
-                onPress={() =>
-                  navigation.navigate('ApplicantDetail', {
-                    applicationId: item.id,
-                  })
-                }
-              >
+              <View style={styles.applicantCard}>
+                <Pressable
+                  onPress={() =>
+                    navigation.navigate('ApplicantDetail', {
+                      applicationId: item.id,
+                    })
+                  }
+                >
                 <View style={styles.cardHeader}>
                   <View style={styles.profileSection}>
                     <UserAvatar
@@ -223,6 +201,7 @@ export function TaskApplicationsScreen() {
                   </Text>
                 ) : null}
                 <Text style={styles.time}>{timeAgo(item.created_at)}</Text>
+                </Pressable>
 
                 {canAct ? (
                   <View style={styles.actionContainer}>
@@ -266,10 +245,10 @@ export function TaskApplicationsScreen() {
                     </Pressable>
                     <Pressable
                       style={[styles.actionPill, styles.rejectPill]}
-                      disabled={actionLoadingId === item.id}
-                      onPress={(e) => {
-                        e.stopPropagation?.();
-                        handleReject(item);
+                      disabled={actionLoadingId === item.id || rejectLoading}
+                      onPress={() => {
+                        setActionLoadingId(item.id);
+                        setRejectTarget(item);
                       }}
                     >
                       <Ionicons
@@ -283,12 +262,25 @@ export function TaskApplicationsScreen() {
                     </Pressable>
                   </View>
                 ) : null}
-              </Pressable>
+              </View>
             );
           }}
           contentContainerStyle={styles.listContent}
         />
       )}
+
+      <RejectReasonModal
+        visible={rejectTarget !== null}
+        applicantName={rejectTarget?.applicant.name ?? ''}
+        loading={rejectLoading}
+        onClose={() => {
+          if (!rejectLoading) {
+            setRejectTarget(null);
+            setActionLoadingId(null);
+          }
+        }}
+        onSubmit={submitReject}
+      />
     </SafeAreaView>
   );
 }

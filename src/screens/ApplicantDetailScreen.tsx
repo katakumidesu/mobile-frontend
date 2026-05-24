@@ -19,6 +19,7 @@ import {
   canRespondToApplication,
 } from '../api/applications';
 import { UserAvatar } from '../components/UserAvatar';
+import { RejectReasonModal } from '../components/RejectReasonModal';
 import { formatPeso } from '../utils/currency';
 import { formatTaskStatusLabel } from '../utils/taskPermissions';
 
@@ -28,6 +29,7 @@ export function ApplicantDetailScreen() {
   const applicationId = route.params?.applicationId as number;
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [application, setApplication] = useState<Awaited<
     ReturnType<typeof fetchApplication>
   > | null>(null);
@@ -81,47 +83,19 @@ export function ApplicantDetailScreen() {
     );
   };
 
-  const handleReject = () => {
-    if (!applicant || !application) return;
-
-    const runReject = async (reason: string) => {
-      const msg = reason.trim();
-      if (msg.length < 3) {
-        Alert.alert('Reason required', 'Please enter at least 3 characters.');
-        return;
-      }
-      setActionLoading(true);
-      try {
-        const res = await rejectApplicant(application.id, msg);
-        Alert.alert('Rejected', res.message, [
-          { text: 'OK', onPress: () => load() },
-        ]);
-      } catch (e: any) {
-        Alert.alert('Error', e.message);
-      } finally {
-        setActionLoading(false);
-      }
-    };
-
-    if (Alert.prompt) {
-      Alert.prompt(
-        'Reject applicant',
-        `Tell ${applicant.name} why they were rejected.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Reject',
-            style: 'destructive',
-            onPress: (reason?: string) => runReject(reason ?? ''),
-          },
-        ],
-        'plain-text',
-      );
-    } else {
-      Alert.alert(
-        'Reject applicant',
-        'Text input is not available in alerts on this device. Please try on iOS or use the applicants list.',
-      );
+  const submitReject = async (reason: string) => {
+    if (!application) return;
+    setActionLoading(true);
+    try {
+      const res = await rejectApplicant(application.id, reason);
+      setRejectModalVisible(false);
+      Alert.alert('Rejected', res.message, [
+        { text: 'OK', onPress: () => load() },
+      ]);
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -278,7 +252,7 @@ export function ApplicantDetailScreen() {
 
             <Pressable
               style={[styles.button, styles.rejectButton]}
-              onPress={handleReject}
+              onPress={() => setRejectModalVisible(true)}
               disabled={actionLoading}
             >
               <Ionicons name="close-circle" size={18} color={colors.error} />
@@ -298,6 +272,16 @@ export function ApplicantDetailScreen() {
           </View>
         )}
       </ScrollView>
+
+      <RejectReasonModal
+        visible={rejectModalVisible}
+        applicantName={applicant?.name ?? ''}
+        loading={actionLoading}
+        onClose={() => {
+          if (!actionLoading) setRejectModalVisible(false);
+        }}
+        onSubmit={submitReject}
+      />
     </SafeAreaView>
   );
 }
